@@ -193,7 +193,7 @@ export class ChessScene {
     this.renderer.domElement.addEventListener('webglcontextrestored', restored);
 
     this.start();
-    if (import.meta.env.DEV) (window as unknown as { __scene: unknown }).__scene = { rig: this.rig, renderer: this.renderer, scene: this.scene, THREE, cinematics: this.cinematicLog };
+    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as { __scene: unknown }).__scene = { rig: this.rig, renderer: this.renderer, scene: this.scene, THREE, cinematics: this.cinematicLog };
     // Leave the loading screen once the first arena (and its real-world assets) is on screen.
     void firstArena.finally(() => requestAnimationFrame(() => this.game.setSceneReady(true)));
   }
