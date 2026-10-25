@@ -1,0 +1,36 @@
+{
+  "name": "chess-realms",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Cinematic 3D chess: eight arenas, Web Worker AI, online rooms, procedural audio.",
+  "scripts": {
+    "dev": "vite --port=3000 --host=0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port=4173",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx src/engine/chess.test.ts && tsx src/engine/gameplay.test.ts && tsx src/engine/ai.test.ts && tsx src/engine/upgrade.test.ts && tsx src/utils/scoreTracker.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "5.2.5",
+    "framer-motion": "^14.5.0",
+    "lucide-react": "^0.546.0",
+    "peerjs": "^1.5.5",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.186.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tailwindcss": "^4.3.3",
+    "tsx": "4.21.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}
