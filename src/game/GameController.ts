@@ -390,7 +390,8 @@ export class GameController {
       paused: false,
       hint: null,
       promotion: null,
-      cameraPreset: 'auto',
+      // Keep the player's last 2D/3D choice from game to game.
+      cameraPreset: loadBoardView(),
       cursor: null,
     });
     this.refreshRecords();
@@ -842,6 +843,12 @@ export class GameController {
   // ---------------------------------------------------------------- camera & misc
   setCameraPreset(cameraPreset: CameraPreset) {
     this.store.set({ cameraPreset });
+    saveBoardView(cameraPreset);
+  }
+
+  /** One-tap 2D / 3D switch (phones): flat view from your side, or your normal 3D seat. */
+  toggleBoardView() {
+    this.setCameraPreset(this.state.cameraPreset === 'top' ? 'auto' : 'top');
   }
 
   skipAnimation() {
@@ -1043,6 +1050,25 @@ export function playMoveSounds(move: Move, isCheck: boolean, isMate: boolean, ma
   else if (isCheck) soundEngine.playCheckSound(file);
   else if (move.captured) soundEngine.playCaptureSound(file, material);
   else soundEngine.playMoveSound(file, material);
+}
+
+const VIEW_KEY = 'cr_board_view_v1';
+
+/** Remembered board view: 'top' (2D) or the default 3D follow camera. */
+function loadBoardView(): CameraPreset {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'top' ? 'top' : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+function saveBoardView(preset: CameraPreset) {
+  try {
+    localStorage.setItem(VIEW_KEY, preset === 'top' ? 'top' : 'auto');
+  } catch {
+    // Storage unavailable (private mode): the choice just isn't remembered.
+  }
 }
 
 export const game = new GameController();

@@ -272,10 +272,26 @@ function MoveList({ tall }: { tall?: boolean }) {
   );
 }
 
+/** Live CSS media query match. */
+function useMediaQuery(query: string): boolean {
+  const [match, setMatch] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
+  React.useEffect(() => {
+    const mq = window.matchMedia(query);
+    const on = () => setMatch(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, [query]);
+  return match;
+}
+
 // ---------------------------------------------------------------- dock
 function Dock({ onPause, onMoves, movesOpen }: { onPause: () => void; onMoves: () => void; movesOpen: boolean }) {
   const s = useStore(game.store, st => ({ canUndo: st.canUndo, mode: st.mode, over: !!st.result, preset: st.cameraPreset, aiThinking: st.aiThinking }));
   const [camOpen, setCamOpen] = useState(false);
+  // Phones: the camera menu becomes a single 2D / 3D switch (no room for a menu, and it's what players reach for).
+  const compact = useMediaQuery('(max-width: 639px), (max-height: 560px) and (pointer: coarse)');
+  const flat = s.preset === 'top';
   const presets: { id: CameraPreset; label: string }[] = [
     { id: 'auto', label: 'Follow' },
     { id: 'white', label: 'White' },
@@ -328,7 +344,9 @@ function Dock({ onPause, onMoves, movesOpen }: { onPause: () => void; onMoves: (
         <nav className="glass pointer-events-auto rounded-[20px] p-1.5 flex items-center gap-0.5" aria-label="Game controls">
           {btn('undo', <RotateCcw size={20} />, 'Undo', () => game.undo(), { disabled: !s.canUndo || s.over || s.mode === 'online', shortcut: 'U' })}
           {btn('hint', <Lightbulb size={20} />, 'Hint', () => void game.requestHint(), { disabled: s.over || s.aiThinking, shortcut: 'H' })}
-          {btn('cam', <Video size={20} />, 'Camera', () => setCamOpen(o => !o), { active: camOpen, shortcut: 'C' })}
+          {compact
+            ? btn('view', <span className="view-toggle" aria-hidden="true">{flat ? '3D' : '2D'}</span>, flat ? 'Switch to 3D view' : 'Switch to 2D view', () => game.toggleBoardView(), { active: flat })
+            : btn('cam', <Video size={20} />, 'Camera', () => setCamOpen(o => !o), { active: camOpen, shortcut: 'C' })}
           {btn('moves', <ListOrdered size={20} />, 'Moves', onMoves, { active: movesOpen })}
           <span className="w-px h-7 mx-1" style={{ background: 'var(--separator)' }} />
           {btn('draw', <Handshake size={20} />, 'Draw', () => game.offerDraw(), { disabled: s.over, shortcut: 'D' })}

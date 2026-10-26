@@ -461,3 +461,9 @@ html[data-reduced-motion="true"] *, html[data-reduced-motion="true"] *::before, 
     padding-bottom: 28px;
   }
 }
+
+/* 2D / 3D switch in the phone dock: a compact text badge in place of an icon. */
+.view-toggle {
+  display: inline-grid; place-items: center; min-width: 30px; height: 22px; padding: 0 6px;
+  border-radius: 7px; border: 1.5px solid currentColor; font-size: 0.75rem; font-weight: 800; letter-spacing: 0.02em;
+}

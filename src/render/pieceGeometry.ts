@@ -38,8 +38,11 @@ function collar(path: P, y: number, r: number, neckR: number) {
   path.lineTo(neckR, y + 0.072);
 }
 
+/** Profile detail (0.5–1) for the piece being built; lighter tiers trace each curve with fewer points. */
+let profileDetail = 1;
+
 function lathe(path: P, segments: number, divisions = 6, phiStart = 0, phiLength = Math.PI * 2): THREE.BufferGeometry {
-  const pts = path.getPoints(divisions).map(p => new THREE.Vector2(Math.max(0, p.x), p.y));
+  const pts = path.getPoints(Math.max(2, Math.round(divisions * profileDetail))).map(p => new THREE.Vector2(Math.max(0, p.x), p.y));
   // Remove consecutive duplicates (they create degenerate, black-shading triangles).
   const clean = pts.filter((p, i) => i === 0 || p.distanceToSquared(pts[i - 1]) > 1e-8);
   return new THREE.LatheGeometry(clean, segments, phiStart, phiLength);
@@ -282,7 +285,10 @@ export function getPieceGeometry(set: PieceSetId, type: PieceType, segments: num
     g = warrior(type);
   } else {
     const build = { p: stauntonPawn, r: stauntonRook, n: stauntonKnight, b: stauntonBishop, q: stauntonQueen, k: stauntonKing }[type];
+    // 48+ segments (high) = full profile; 36–47 (medium) = 3/4; 32 or fewer (phones, low) = half.
+    profileDetail = segments >= 48 ? 1 : segments >= 36 ? 0.75 : 0.5;
     g = build(segments);
+    profileDetail = 1;
   }
   cache.set(key, g);
   return g;

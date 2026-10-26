@@ -309,6 +309,8 @@ export async function createMetropolis(ctx: RealmContext): Promise<Realm> {
     group.add(g);
   }
   const steel = assets.track(new THREE.MeshStandardMaterial({ color: 0x9aa0a8, metalness: 1, roughness: 0.3 }));
+  // Brushed (rougher) steel for the table base so the floodlight doesn't flare off it.
+  const brushed = assets.track(new THREE.MeshStandardMaterial({ color: 0x7c828a, metalness: 0.9, roughness: 0.55 }));
   const railParts: THREE.BufferGeometry[] = [];
   for (let w = 0; w < 4; w++) {
     const g = box(PAD * 2 + 8, 0.8, 1.2, 0, ROOF + 16.2, -PAD - 2);
@@ -322,8 +324,8 @@ export async function createMetropolis(ctx: RealmContext): Promise<Realm> {
   const graniteMat = assets.track(new THREE.MeshPhysicalMaterial({ ...tiled(assets, granite, 1), color: 0x34343a, clearcoat: 0.8, clearcoatRoughness: 0.1 }));
   const top = new THREE.Mesh(assets.track(new RoundedBoxGeometry(13.4, 0.8, 13.4, 3, 0.2)), graniteMat);
   top.position.y = -0.33 - 0.4;
-  const stem = new THREE.Mesh(assets.track(new THREE.CylinderGeometry(1.2, 1.2, -1.13 - ROOF, 24).translate(0, (ROOF - 1.13) / 2, 0)), steel);
-  const foot = new THREE.Mesh(assets.track(new THREE.CylinderGeometry(4.5, 5, 0.6, 32).translate(0, ROOF + 0.3, 0)), steel);
+  const stem = new THREE.Mesh(assets.track(new THREE.CylinderGeometry(1.2, 1.2, -1.13 - ROOF, 24).translate(0, (ROOF - 1.13) / 2, 0)), brushed);
+  const foot = new THREE.Mesh(assets.track(new THREE.CylinderGeometry(4.5, 5, 0.6, 32).translate(0, ROOF + 0.3, 0)), brushed);
   for (const m of [top, stem, foot]) {
     m.castShadow = m.receiveShadow = true;
     group.add(m);
@@ -490,6 +492,8 @@ export async function createMetropolis(ctx: RealmContext): Promise<Realm> {
   };
 
   const hp = new THREE.Vector3();
+  const beamDir = new THREE.Vector3();
+  const DOWN = new THREE.Vector3(0, -1, 0);
   const look = new THREE.Vector3();
   let blink = 0;
   return {
@@ -516,13 +520,14 @@ export async function createMetropolis(ctx: RealmContext): Promise<Realm> {
       (heli.userData.strobe as THREE.Mesh).visible = blink > 0;
       (heli.userData.belly as THREE.Mesh).visible = time % 1 < 0.5;
       // Searchlight sweeps across the roof and the neighbouring towers.
-      search.position.copy(hp).add(new THREE.Vector3(0, -9, 0));
+      search.position.copy(hp);
+      search.position.y -= 9;
       const sweep = time * 0.35;
       search.target.position.set(Math.sin(sweep) * 60, ROOF, Math.cos(sweep * 0.7) * 50);
       search.target.updateMatrixWorld();
       beam.position.copy(search.position);
-      const dir = search.target.position.clone().sub(search.position).normalize();
-      beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
+      beamDir.copy(search.target.position).sub(search.position).normalize();
+      beam.quaternion.setFromUnitVectors(DOWN, beamDir);
       flare.position.copy(search.position);
       // Beacons blink together.
       beaconMat.opacity = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(time * 2.6));

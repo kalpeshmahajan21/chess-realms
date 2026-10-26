@@ -206,3 +206,23 @@ MetropolisRealm,EgyptRealm,CafeRealm}.ts`. New CC0 Poly Haven assets; unused pho
 - Fixed: landscape phones — menu now uses two columns with a compact header; pop-up sheets and the game-over
   card scroll instead of running off-screen.
 - Fixed: bright hotspot on the library floor in the phone camera view (satin floor, softer lamp, calmer glow).
+
+## v2.7 — Smooth on phones and laptops, 2D/3D view, new README
+
+Player feedback: lag on phones after a few minutes, some lag on PCs, flat/unsteady 3D on phones.
+
+- **Phones run cooler:** 30 fps when nothing moves (any touch or animation restores full speed) and a 60 fps
+  cap on 120 Hz screens — the main cause of "smooth at first, laggy later" was thermal throttling.
+- **Phone tier:** no MSAA (dense screens), 2 lamps max, 1024 shadow map, lighter pieces (pawn 6,800 → 2,880
+  triangles), fewer particles, pixel budget ~1.15 MP (tablets 2 MP).
+- **Lighter scenes everywhere:** 16 heavy CC0 models simplified (e.g. potted plant 154k → 13k triangles,
+  boulder 97k → 6k) and 15 prop texture sets shrunk to 512 px — models folder 64 MB → 32 MB, so arenas also
+  download twice as fast. Per-frame allocations removed from the helicopter and palace birds.
+- **PCs:** a pixel budget per tier for big/high-DPI screens; Auto starts integrated graphics (Intel/AMD
+  Radeon Graphics) on Medium and steps down a tier by itself if a device can't hold 40 fps; High pieces 56 → 48
+  segments; shadows refresh at 30 Hz while pieces move.
+- **Phone camera:** the idle "breathing" drift is off on touch screens (it read as a wobbling board); the
+  portrait 3D view is lower and more cinematic, with the arena visible above the board.
+- **2D / 3D button** on phones (replaces the camera menu there): flat view from your side, one tap back;
+  remembered between games.
+- README rebuilt with banner, animated gameplay demo, arena gallery, phone showcase and architecture diagram.

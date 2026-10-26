@@ -429,6 +429,7 @@ export async function createPalace(ctx: RealmContext): Promise<Realm> {
   const bq = new THREE.Quaternion();
   const bs = new THREE.Vector3(2, 2, 2);
   const bp = new THREE.Vector3();
+  const be = new THREE.Euler();
   return {
     group,
     lighting,
@@ -440,7 +441,7 @@ export async function createPalace(ctx: RealmContext): Promise<Realm> {
       birdPhase.forEach((b, i) => {
         b.a += b.sp * dt;
         bp.set(Math.cos(b.a) * b.rad, b.y + Math.sin(time * 0.5 + i) * 6, Math.sin(b.a) * b.rad);
-        bq.setFromEuler(new THREE.Euler(Math.sin(time * 9 + i) * 0.5, -b.a, 0));
+        bq.setFromEuler(be.set(Math.sin(time * 9 + i) * 0.5, -b.a, 0));
         bm.compose(bp, bq, bs);
         birds.setMatrixAt(i, bm);
       });

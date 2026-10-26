@@ -79,17 +79,24 @@ export class CameraRig {
 
   /** Player seat view for a side. */
   seat(side: 'w' | 'b', lambda = 3.4) {
-    // Portrait phones: look down more steeply so the board fills the narrow screen.
-    const polar = this.aspect < 0.75 ? 0.58 : this.aspect < 1.1 ? Math.min(0.9, this.preferredPolar) : this.preferredPolar;
-    this.setView(side === 'w' ? 0 : Math.PI, polar, 1, lambda);
+    // Portrait phones: a real 3D angle (the arena shows above the board); the 2D button gives the flat view.
+    const polar = this.aspect < 0.75 ? 1.0 : this.aspect < 1.1 ? Math.min(0.9, this.preferredPolar) : this.preferredPolar;
+    const az = side === 'w' ? 0 : Math.PI;
+    this.setView(az, polar, 1, lambda);
+    if (this.aspect < 0.75) {
+      // Portrait: aim a little past the board so it sits lower (near the thumbs) and the arena fills the top.
+      this.desired.target.z = -1.5 * Math.cos(az);
+      this.desired.distance *= 1.04;
+    }
   }
 
   sideView() {
     this.setView(Math.PI / 2, 1.0, 1.02);
   }
 
+  /** Flat "2D" view from the player's side. A slight tilt keeps king, queen and bishop tops recognisable. */
   topView(side: 'w' | 'b') {
-    this.setView(side === 'w' ? 0 : Math.PI, 0.0001, 0.92);
+    this.setView(side === 'w' ? 0 : Math.PI, 0.16, 0.9);
   }
 
   /** Slow continuous orbit (menu backdrop, victory). */
@@ -139,6 +146,20 @@ export class CameraRig {
       this.orbitSpeed = 0;
     }
     this.lambda = lambda;
+  }
+
+  /** True while the camera is still travelling, orbiting, shaking or tracking (used to decide the frame rate). */
+  get moving(): boolean {
+    // A slow showcase orbit (menu, victory) looks the same at 30 fps, so it does not count as motion.
+    if (this.orbitSpeed !== 0 && !this.track && this.trauma <= 0.001) return false;
+    const c = this.current;
+    const d = this.desired;
+    let da = Math.abs(c.azimuth - d.azimuth) % (Math.PI * 2);
+    if (da > Math.PI) da = Math.PI * 2 - da;
+    return (
+      !!this.track || this.trauma > 0.001 || Math.abs(this.fovKick) > 0.02 ||
+      da > 0.0008 || Math.abs(c.polar - d.polar) > 0.0008 || Math.abs(c.distance - d.distance) > 0.004 || c.target.distanceTo(d.target) > 0.002
+    );
   }
 
   get inCinematic() {

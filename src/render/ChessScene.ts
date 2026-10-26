@@ -3,7 +3,7 @@ import type { GameController, GameState, ViewEvents } from '../game/GameControll
 import { soundEngine } from '../audio/soundEngine.ts';
 import { ArenaManager } from '../graphics/arenas/arenaManager.ts';
 import { getArenaTheme, ArenaTheme } from '../config/arenaThemes.ts';
-import { QUALITY_PRESETS, resolveQuality, QualityPreset, ResolvedQuality } from '../config/quality.ts';
+import { isTouchDevice, lowerAutoTier, presetFor, resolveQuality, QualityPreset, ResolvedQuality } from '../config/quality.ts';
 import { TIMING } from '../config/gameConfig.ts';
 import { Animator } from './anim.ts';
 import { BoardView, squareCenter, squareFromPoint } from './BoardView.ts';
@@ -108,6 +108,12 @@ export class ChessScene {
   private slowmo = 0;
   private frameTimes: number[] = [];
   private pixelRatio = 1;
+  /** Touch devices drop to 30 fps when nothing is moving, so phones don't heat up and throttle mid-game. */
+  private readonly idleThrottle = isTouchDevice();
+  private lastActivity = 0;
+  private lastRender = 0;
+  private tickCount = 0;
+  private slowChecks = 0;
   private adaptCooldown = 2;
   private prevState: GameState | null = null;
   private moveInFlight = false;
@@ -193,7 +199,11 @@ export class ChessScene {
     this.renderer.domElement.addEventListener('webglcontextrestored', restored);
 
     this.start();
-    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as { __scene: unknown }).__scene = { rig: this.rig, renderer: this.renderer, scene: this.scene, THREE, cinematics: this.cinematicLog };
+    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as { __scene: unknown }).__scene = {
+      rig: this.rig, renderer: this.renderer, scene: this.scene, THREE, cinematics: this.cinematicLog,
+      // Frame pacing diagnostics for tests: rendered ticks so far, and why the scene counts as active.
+      perf: () => ({ ticks: this.tickCount, idleThrottle: this.idleThrottle, sinceActivity: Math.round(performance.now() - this.lastActivity), busy: this.animator.busy, rigMoving: this.rig.moving, slowmo: this.slowmo > 0 }),
+    };
     // Leave the loading screen once the first arena (and its real-world assets) is on screen.
     void firstArena.finally(() => requestAnimationFrame(() => this.game.setSceneReady(true)));
   }
@@ -203,8 +213,8 @@ export class ChessScene {
     const name = resolveQuality(q);
     if (!initial && name === this.qualityName) return;
     this.qualityName = name;
-    this.quality = QUALITY_PRESETS[name];
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, this.quality.maxPixelRatio);
+    this.quality = presetFor(name);
+    this.pixelRatio = this.maxPixelRatio();
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(this.width, this.height, false);
     // three r186 folds soft shadows into PCF; the kernel radius controls penumbra softness.
@@ -281,6 +291,7 @@ export class ChessScene {
     this.applyThemeLighting();
     if (realm) {
       this.realm = realm;
+      this.capRealmLights(realm.group);
       this.scene.add(realm.group);
       this.applyRealmLighting(realm);
     } else {
@@ -422,8 +433,22 @@ export class ChessScene {
     lights.slice(this.quality.maxPointLights).forEach(l => l.parent?.remove(l));
   }
 
+  /**
+   * Every point/spot light costs work on every lit pixel. Keep only the tier's budget (strongest first);
+   * phones get two, which is where most of the per-pixel cost went.
+   */
+  private capRealmLights(group: THREE.Object3D) {
+    const lights: THREE.Light[] = [];
+    group.traverse(o => {
+      if ((o as THREE.PointLight).isPointLight) lights.push(o as THREE.Light);
+    });
+    lights.sort((a, b) => b.intensity - a.intensity);
+    lights.slice(this.quality.maxPointLights).forEach(l => l.parent?.remove(l));
+  }
+
   // ------------------------------------------------------------------ store reactions
   private onState(s: GameState) {
+    this.markActive();
     const p = this.prevState;
     this.prevState = s;
     if (!p || p.arena !== s.arena) this.transitionArena(s.arena);
@@ -443,7 +468,8 @@ export class ChessScene {
       }
     }
     this.rig.sensitivity = s.settings.cameraSensitivity;
-    this.rig.idleSway = !s.settings.reducedMotion;
+    // The idle camera drift reads as a wobbling board on a hand-held screen, so phones and tablets keep it still.
+    this.rig.idleSway = !s.settings.reducedMotion && !isTouchDevice();
 
     // Camera intent
     if (!p || p.screen !== s.screen || p.cameraPreset !== s.cameraPreset || p.turn !== s.turn || p.replay.active !== s.replay.active || p.p1.color !== s.p1.color) {
@@ -690,9 +716,9 @@ export class ChessScene {
   private bindInput() {
     const el = this.renderer.domElement;
     const opts = { passive: false } as AddEventListenerOptions;
-    const down = (e: PointerEvent) => this.onPointerDown(e);
-    const move = (e: PointerEvent) => this.onPointerMove(e);
-    const up = (e: PointerEvent) => this.onPointerUp(e);
+    const down = (e: PointerEvent) => { this.markActive(); this.onPointerDown(e); };
+    const move = (e: PointerEvent) => { this.markActive(); this.onPointerMove(e); };
+    const up = (e: PointerEvent) => { this.markActive(); this.onPointerUp(e); };
     const leave = () => {
       if (this.hover !== null) {
         this.hover = null;
@@ -701,6 +727,7 @@ export class ChessScene {
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
+      this.markActive();
       this.rig.zoomBy(Math.exp(e.deltaY * 0.0012));
     };
     const ctx = (e: Event) => e.preventDefault();
@@ -882,9 +909,15 @@ export class ChessScene {
       if (!this.running) return;
       this.raf = requestAnimationFrame(loop);
       const now = performance.now();
+      const idle = this.idleThrottle && now - this.lastActivity > 1500;
+      // Phones: at most 60 fps while active (120 Hz screens would double the heat for no visible gain),
+      // and ≈30 fps when nothing is moving. Any touch or animation brings back full speed.
+      const minGap = !this.idleThrottle ? 0 : idle ? 30 : 15;
+      if (now - this.lastRender < minGap) return;
       const dt = Math.min(0.05, (now - this.last) / 1000);
       this.last = now;
-      this.tick(dt);
+      this.lastRender = now;
+      this.tick(dt, idle);
     };
     this.raf = requestAnimationFrame(loop);
   }
@@ -894,7 +927,13 @@ export class ChessScene {
     cancelAnimationFrame(this.raf);
   }
 
-  private tick(dt: number) {
+  /** Note that something is happening on screen (input, animation, camera travel): keep full frame rate. */
+  private markActive() {
+    this.lastActivity = performance.now();
+  }
+
+  private tick(dt: number, idle = false) {
+    this.tickCount++;
     // Slow motion around cinematic impacts, eased back to normal speed.
     if (this.slowmo > 0) this.slowmo -= dt;
     const targetScale = this.slowmo > 0 ? 0.3 : 1;
@@ -911,9 +950,13 @@ export class ChessScene {
     else this.arena.update(gdt, s.turn, s.p1.name, s.p2.name, s.sanHistory.length + 1, s.cameraPreset === 'top');
     this.rig.update(dt);
 
-    if (this.animator.busy || this.dragSq !== null) this.shadowDirty = Math.max(this.shadowDirty, 1);
+    // Moving pieces: refresh shadows every other frame (30 Hz looks identical and halves the shadow cost).
+    if ((this.animator.busy || this.dragSq !== null) && this.tickCount % 2 === 0) this.shadowDirty = Math.max(this.shadowDirty, 1);
+    if (this.animator.busy || this.dragSq !== null || this.rig.moving || this.slowmo > 0) this.markActive();
     this.renderFrame(dt);
-    this.adaptResolution(dt);
+    // Throttled idle frames are slow on purpose; judging resolution by them would wrongly lower it.
+    if (!idle) this.adaptResolution(dt);
+    else this.frameTimes.length = 0;
   }
 
   private renderFrame(dt: number) {
@@ -933,8 +976,20 @@ export class ChessScene {
     const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
     this.frameTimes.length = 0;
     if (this.adaptCooldown > 0) return;
-    const max = Math.min(window.devicePixelRatio || 1, this.quality.maxPixelRatio);
+    const max = this.maxPixelRatio();
     let next = this.pixelRatio;
+    // Already at the lowest resolution and still slow: on Auto, step down a quality tier (remembered).
+    if (avg > 1 / 40 && this.pixelRatio <= this.quality.minPixelRatio + 0.01) {
+      this.slowChecks++;
+      if (this.slowChecks >= 3 && this.game.state.settings.graphicsQuality === 'auto' && this.qualityName !== 'low') {
+        this.slowChecks = 0;
+        lowerAutoTier(this.qualityName);
+        this.applyQuality('auto');
+        return;
+      }
+    } else {
+      this.slowChecks = 0;
+    }
     if (avg > 1 / 45) next = Math.max(this.quality.minPixelRatio, this.pixelRatio - 0.15);
     else if (avg < 1 / 58 && this.pixelRatio < max) next = Math.min(max, this.pixelRatio + 0.1);
     if (Math.abs(next - this.pixelRatio) > 0.01) {
@@ -949,12 +1004,25 @@ export class ChessScene {
     }
   }
 
+  /** Highest pixel ratio allowed: device DPR, the tier's cap, and the tier's pixel budget for this canvas size. */
+  private maxPixelRatio(): number {
+    const area = Math.max(1, this.width * this.height);
+    const byBudget = Math.sqrt((this.quality.pixelBudget * 1e6) / area);
+    return Math.max(this.quality.minPixelRatio, Math.min(window.devicePixelRatio || 1, this.quality.maxPixelRatio, byBudget));
+  }
+
   private resize() {
     const w = Math.max(1, this.container.clientWidth);
     const h = Math.max(1, this.container.clientHeight);
     if (w === this.width && h === this.height) return;
     this.width = w;
     this.height = h;
+    // A bigger canvas may push past the pixel budget; drop the ratio before resizing.
+    const maxRatio = this.maxPixelRatio();
+    if (this.pixelRatio > maxRatio) {
+      this.pixelRatio = maxRatio;
+      this.renderer.setPixelRatio(maxRatio);
+    }
     this.renderer.setSize(w, h, false);
     this.post.setSize(w, h);
     this.rig.resize(w / h, h);
