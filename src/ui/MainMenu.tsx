@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, ChevronRight, Globe, HelpCircle, Pencil, Settings, Users, Check } from 'lucide-react';
+import { Bot, ChevronLeft, ChevronRight, Globe, HelpCircle, Pencil, Settings, Users, Check } from 'lucide-react';
 import { game } from '../game/GameController.ts';
 import { useStore } from '../game/store.ts';
 import { AI_LEVELS, CLOCK_LABELS } from '../config/gameConfig.ts';
@@ -329,6 +329,8 @@ function ArenaPicker({ current, onDone }: { current: string; onDone: () => void 
   React.useEffect(() => {
     prefetchArenas(ARENA_THEMES.map(a => a.id));
   }, []);
+  const row = React.useRef<HTMLDivElement>(null);
+  const { canLeft, canRight, page, dragProps } = useSideScroll(row);
   return (
     <motion.div
       className="pointer-events-auto absolute left-0 right-0 bottom-0 pt-16"
@@ -350,7 +352,17 @@ function ArenaPicker({ current, onDone }: { current: string; onDone: () => void 
           <Check size={18} strokeWidth={2.6} /> Done
         </button>
       </div>
-      <div className="flex gap-3 overflow-x-auto no-scrollbar snap-x snap-mandatory px-4 sm:px-8 pb-1 pt-2 max-w-6xl mx-auto" role="radiogroup" aria-label="Arena">
+      <div className="relative max-w-6xl mx-auto">
+      {/* Edge fades and arrows: computers can't swipe, so these (plus wheel and drag) move the row. */}
+      <span className="arena-row-fade left" data-on={canLeft} aria-hidden="true" />
+      <span className="arena-row-fade right" data-on={canRight} aria-hidden="true" />
+      <button className="arena-row-arrow left" data-on={canLeft} aria-label="Previous arenas" tabIndex={canLeft ? 0 : -1} onClick={() => { tap(); page(-1); }}>
+        <ChevronLeft size={22} strokeWidth={2.4} />
+      </button>
+      <button className="arena-row-arrow right" data-on={canRight} aria-label="More arenas" tabIndex={canRight ? 0 : -1} onClick={() => { tap(); page(1); }}>
+        <ChevronRight size={22} strokeWidth={2.4} />
+      </button>
+      <div ref={row} {...dragProps} className="arena-row flex gap-3 overflow-x-auto no-scrollbar snap-x snap-proximity px-4 sm:px-8 pb-1 pt-2" role="radiogroup" aria-label="Arena">
         {ARENA_THEMES.map((a, i) => {
           const on = a.id === current;
           return (
@@ -384,6 +396,88 @@ function ArenaPicker({ current, onDone }: { current: string; onDone: () => void 
           );
         })}
       </div>
+      </div>
     </motion.div>
   );
+}
+
+/**
+ * Sideways scrolling for a row of cards on every input: touch swipes natively; a mouse wheel scrolls it
+ * sideways; click-and-drag scrolls it; `page(±1)` jumps by most of a screen (the arrow buttons).
+ */
+function useSideScroll(ref: React.RefObject<HTMLDivElement | null>) {
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+  const drag = React.useRef({ down: false, moved: false, x: 0, left: 0 });
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      setCanLeft(el.scrollLeft > 4);
+      setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+    };
+    // A vertical wheel moves the row sideways (only while it can still move, so the page never feels stuck).
+    const wheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      const max = el.scrollWidth - el.clientWidth;
+      if (max <= 0) return;
+      const next = Math.max(0, Math.min(max, el.scrollLeft + e.deltaY));
+      if (next === el.scrollLeft) return;
+      e.preventDefault();
+      el.scrollLeft = next;
+    };
+    // Start with the selected arena in view.
+    el.querySelector<HTMLElement>('[aria-checked="true"]')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    el.addEventListener('wheel', wheel, { passive: false });
+    window.addEventListener('resize', update);
+    return () => {
+      el.removeEventListener('scroll', update);
+      el.removeEventListener('wheel', wheel);
+      window.removeEventListener('resize', update);
+    };
+  }, [ref]);
+
+  const page = (dir: 1 | -1) => {
+    const el = ref.current;
+    if (el) el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: 'smooth' });
+  };
+
+  // Mouse click-and-drag (touch already scrolls natively). A drag never counts as a click on a card.
+  const dragProps = {
+    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.pointerType !== 'mouse' || !ref.current) return;
+      drag.current = { down: true, moved: false, x: e.clientX, left: ref.current.scrollLeft };
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = drag.current;
+      if (!d.down || !ref.current) return;
+      const dx = e.clientX - d.x;
+      if (!d.moved && Math.abs(dx) > 6) {
+        d.moved = true;
+        ref.current.setPointerCapture(e.pointerId);
+        ref.current.classList.add('dragging');
+      }
+      if (d.moved) ref.current.scrollLeft = d.left - dx;
+    },
+    onPointerUp: () => {
+      drag.current.down = false;
+      ref.current?.classList.remove('dragging');
+    },
+    onPointerCancel: () => {
+      drag.current.down = false;
+      ref.current?.classList.remove('dragging');
+    },
+    onClickCapture: (e: React.MouseEvent) => {
+      if (drag.current.moved) {
+        e.stopPropagation();
+        e.preventDefault();
+        drag.current.moved = false;
+      }
+    },
+  };
+
+  return { canLeft, canRight, page, dragProps };
 }

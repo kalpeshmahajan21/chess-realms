@@ -467,3 +467,24 @@ html[data-reduced-motion="true"] *, html[data-reduced-motion="true"] *::before, 
   display: inline-grid; place-items: center; min-width: 30px; height: 22px; padding: 0 6px;
   border-radius: 7px; border: 1.5px solid currentColor; font-size: 0.75rem; font-weight: 800; letter-spacing: 0.02em;
 }
+
+/* Arena row: edge fades + arrows (shown on devices with a mouse), drag cursor. */
+.arena-row { cursor: grab; scroll-behavior: auto; }
+.arena-row.dragging { cursor: grabbing; scroll-snap-type: none; }
+.arena-row.dragging .arena-card { pointer-events: none; }
+.arena-row-fade { position: absolute; top: 0; bottom: 0; width: 56px; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 0.25s ease; }
+.arena-row-fade.left { left: 0; background: linear-gradient(90deg, rgba(6,6,10,0.85), rgba(6,6,10,0)); }
+.arena-row-fade.right { right: 0; background: linear-gradient(270deg, rgba(6,6,10,0.85), rgba(6,6,10,0)); }
+.arena-row-fade[data-on="true"] { opacity: 1; }
+.arena-row-arrow {
+  position: absolute; top: 50%; z-index: 3; width: 44px; height: 44px; margin-top: -18px; border-radius: 999px;
+  display: none; place-items: center; color: #fff;
+  background: rgba(20,20,26,0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.16);
+  transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease; opacity: 0; pointer-events: none;
+}
+.arena-row-arrow.left { left: 10px; }
+.arena-row-arrow.right { right: 10px; }
+.arena-row-arrow[data-on="true"] { opacity: 1; pointer-events: auto; }
+.arena-row-arrow:hover { background: rgba(40,40,50,0.9); transform: scale(1.06); }
+@media (hover: hover) and (pointer: fine) { .arena-row-arrow { display: grid; } }
