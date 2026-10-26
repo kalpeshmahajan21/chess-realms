@@ -226,3 +226,17 @@ Player feedback: lag on phones after a few minutes, some lag on PCs, flat/unstea
 - **2D / 3D button** on phones (replaces the camera menu there): flat view from your side, one tap back;
   remembered between games.
 - README rebuilt with banner, animated gameplay demo, arena gallery, phone showcase and architecture diagram.
+
+## v2.8 — Fast arena switching, clean app splash
+
+- **Splash screen:** app icons split into transparent "any" icons (splash shows only the crest, no black
+  square) and solid "maskable" icons in the app's background colour for home screens.
+- **Arena switching on a mid-range phone (4G, CPU 4x):** first visits 5–17 s → about 3–3.5 s; recently used
+  arenas switch back in ~0.5 s.
+  - Phones load lite assets: 512 px textures and lighting, 2K skies (all arenas: 40 MB → 16 MB).
+  - 24 more props had oversized textures shrunk (models folder 32 MB → 8 MB for everyone).
+  - Arenas prefetch in the background when the arena picker opens (and while idle on Wi-Fi or desktop);
+    prefetching pauses while the chosen arena loads, and stops on Data Saver/2G.
+  - Recent arenas stay built in memory (2 on phones, 3 on computers, none on Low).
+  - Shaders are reused across arenas: a fixed number of light slots, fog always present, and no synchronous
+    shader-error checks in production.

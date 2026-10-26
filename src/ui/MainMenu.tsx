@@ -6,6 +6,7 @@ import { useStore } from '../game/store.ts';
 import { AI_LEVELS, CLOCK_LABELS } from '../config/gameConfig.ts';
 import { ARENA_THEMES, getArenaTheme } from '../config/arenaThemes.ts';
 import { PIECE_MATERIALS_LIST } from '../render/pieceMaterials.ts';
+import { prefetchArenas } from '../render/realms/prefetch.ts';
 import type { ClockMode, GameMode, PieceColor } from '../types.ts';
 import { LogoMark, Segmented, softSpring, spring, tap } from './kit.tsx';
 
@@ -324,6 +325,10 @@ function SwatchRow({ label, value, onChange }: { label: string; value: string; o
 
 function ArenaPicker({ current, onDone }: { current: string; onDone: () => void }) {
   const selected = getArenaTheme(current as never);
+  // The player is about to choose: download every arena in the background (picker order) so a tap opens it fast.
+  React.useEffect(() => {
+    prefetchArenas(ARENA_THEMES.map(a => a.id));
+  }, []);
   return (
     <motion.div
       className="pointer-events-auto absolute left-0 right-0 bottom-0 pt-16"

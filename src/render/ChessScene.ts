@@ -13,7 +13,8 @@ import { Effects } from './Effects.ts';
 import { PostFX, buildEnvironment } from './PostFX.ts';
 import { batchStatic } from './staticBatch.ts';
 import { REALM_FACTORIES } from './realms/index.ts';
-import { AssetScope } from './realms/assets.ts';
+import { AssetScope, setLiteAssets } from './realms/assets.ts';
+import { ALL_ARENAS, holdPrefetch, idlePrefetchOk, prefetchArenas } from './realms/prefetch.ts';
 import type { Realm } from './realms/types.ts';
 import type { ScannedBoard } from './BoardView.ts';
 import type { ArenaId } from '../audio/soundEngine.ts';
@@ -114,6 +115,11 @@ export class ChessScene {
   private lastRender = 0;
   private tickCount = 0;
   private slowChecks = 0;
+  /** How long the last arena took to load and build (ms), for tests. */
+  private lastArenaMs = 0;
+  /** Recently used arenas kept built (see realmCacheLimit). */
+  private realmCache = new Map<ArenaId, { realm: Realm; scanned: ScannedBoard | null; boardScope: AssetScope; quality: ResolvedQuality }>();
+  private prevScanned: ScannedBoard | null = null;
   private adaptCooldown = 2;
   private prevState: GameState | null = null;
   private moveInFlight = false;
@@ -126,6 +132,9 @@ export class ChessScene {
     this.width = w;
     this.height = h;
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false });
+    // Checking shader logs forces each compile to finish synchronously (and defeats parallel compiling):
+    // keep it for development only, so arena switches don't stall.
+    this.renderer.debug.checkShaderErrors = import.meta.env.DEV;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.shadowMap.enabled = true;
@@ -202,10 +211,16 @@ export class ChessScene {
     if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as { __scene: unknown }).__scene = {
       rig: this.rig, renderer: this.renderer, scene: this.scene, THREE, cinematics: this.cinematicLog,
       // Frame pacing diagnostics for tests: rendered ticks so far, and why the scene counts as active.
-      perf: () => ({ ticks: this.tickCount, idleThrottle: this.idleThrottle, sinceActivity: Math.round(performance.now() - this.lastActivity), busy: this.animator.busy, rigMoving: this.rig.moving, slowmo: this.slowmo > 0 }),
+      perf: () => ({ arena: this.builtArena, arenaMs: this.lastArenaMs, ticks: this.tickCount, idleThrottle: this.idleThrottle, sinceActivity: Math.round(performance.now() - this.lastActivity), busy: this.animator.busy, rigMoving: this.rig.moving, slowmo: this.slowmo > 0 }),
     };
     // Leave the loading screen once the first arena (and its real-world assets) is on screen.
-    void firstArena.finally(() => requestAnimationFrame(() => this.game.setSceneReady(true)));
+    void firstArena.finally(() => {
+      requestAnimationFrame(() => this.game.setSceneReady(true));
+      // A few seconds after the first arena is up, quietly fetch the others so switching is near-instant.
+      window.setTimeout(() => {
+        if (!this.disposed && idlePrefetchOk(isTouchDevice())) prefetchArenas(ALL_ARENAS);
+      }, 4000);
+    });
   }
 
   // ------------------------------------------------------------------ configuration
@@ -214,6 +229,7 @@ export class ChessScene {
     if (!initial && name === this.qualityName) return;
     this.qualityName = name;
     this.quality = presetFor(name);
+    setLiteAssets(isTouchDevice() || name === 'low');
     this.pixelRatio = this.maxPixelRatio();
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(this.width, this.height, false);
@@ -230,6 +246,7 @@ export class ChessScene {
     this.effects.setViewportHeight(this.height, this.pixelRatio);
     this.shadowDirty = 3;
     if (!initial) {
+      this.clearRealmCache(); // built for the old quality tier
       this.setArena(this.game.state.arena, true);
       if (this.configurePieces()) this.pieces.sync(this.game.engine.state.board, { rebuild: true });
     }
@@ -249,14 +266,24 @@ export class ChessScene {
     if (!force && id === this.builtArena) return;
     this.builtArena = id;
     const token = ++this.arenaToken;
+    const t0 = performance.now();
     const theme = getArenaTheme(id);
     const factory = REALM_FACTORIES[id];
 
     let realm: Realm | null = null;
     let scanned: ScannedBoard | null = null;
-    const boardScope = new AssetScope();
-    if (factory || theme.board.scan) {
+    let boardScope = new AssetScope();
+    // A recently used arena kept in memory comes back instantly, with no download or rebuild.
+    const cached = force ? undefined : this.realmCache.get(id);
+    if (cached && cached.quality === this.qualityName) {
+      this.realmCache.delete(id);
+      realm = cached.realm;
+      scanned = cached.scanned;
+      boardScope.dispose();
+      boardScope = cached.boardScope;
+    } else if (factory || theme.board.scan) {
       this.game.setArenaLoading(true);
+      const releasePrefetch = holdPrefetch();
       try {
         [realm, scanned] = await Promise.all([
           factory ? factory({ renderer: this.renderer, quality: this.quality, qualityName: this.qualityName }) : Promise.resolve(null),
@@ -268,6 +295,7 @@ export class ChessScene {
         realm = null;
         scanned = null;
       } finally {
+        releasePrefetch();
         if (token === this.arenaToken) this.game.setArenaLoading(false);
       }
       if (token !== this.arenaToken || this.disposed) {
@@ -277,15 +305,22 @@ export class ChessScene {
       }
     }
 
-    // Tear down whatever was there before.
+    // Tear down whatever was there before (or keep it for a quick switch back).
+    const prevId = this.theme?.id;
     if (this.realm) {
       this.scene.remove(this.realm.group);
-      this.realm.dispose();
+      if (prevId && prevId !== id && this.realmCacheLimit() > 0 && this.boardScope) {
+        this.stashRealm(prevId, this.realm, this.prevScanned, this.boardScope);
+        this.boardScope = null;
+      } else {
+        this.realm.dispose();
+      }
       this.realm = null;
     }
     this.arena.clear();
     this.boardScope?.dispose();
     this.boardScope = boardScope;
+    this.prevScanned = scanned;
     this.theme = theme;
 
     this.applyThemeLighting();
@@ -303,6 +338,7 @@ export class ChessScene {
     const s = this.game.state;
     this.effects.setAmbient(theme.light.ambientParticles, s.settings.ambientEffects && !s.settings.reducedMotion, this.quality.particles);
     soundEngine.playArenaAmbient(id);
+    this.lastArenaMs = Math.round(performance.now() - t0);
     this.shadowDirty = 3;
     // The arena may change the preferred camera angle.
     this.updateCameraIntent(this.game.state, null);
@@ -328,7 +364,8 @@ export class ChessScene {
   private applyRealmLighting(realm: Realm) {
     const L = realm.lighting;
     this.renderer.toneMappingExposure = L.exposure;
-    this.scene.fog = L.fog ? new THREE.FogExp2(L.fog.color, L.fog.density) : null;
+    // Fog is always present (zero density when an arena has none): toggling it would recompile every shader.
+    this.scene.fog = L.fog ? new THREE.FogExp2(L.fog.color, L.fog.density) : new THREE.FogExp2(0x000000, 0);
     this.sun.color.setHex(L.sunColor);
     this.sun.intensity = L.sunIntensity;
     this.sun.position.copy(L.sunDir).normalize().multiplyScalar(40);
@@ -433,6 +470,37 @@ export class ChessScene {
     lights.slice(this.quality.maxPointLights).forEach(l => l.parent?.remove(l));
   }
 
+  /** Fixed number of point lights every arena uses (phones 2, computers up to 4). */
+  private pointLightSlots(): number {
+    return Math.min(this.quality.maxPointLights, 4);
+  }
+
+  /** How many previous arenas stay built in memory: none on Low, two on phones/tablets, three on computers. */
+  private realmCacheLimit(): number {
+    if (this.qualityName === 'low') return 0;
+    return isTouchDevice() ? 2 : 3;
+  }
+
+  private stashRealm(id: ArenaId, realm: Realm, scanned: ScannedBoard | null, boardScope: AssetScope) {
+    this.realmCache.delete(id);
+    this.realmCache.set(id, { realm, scanned, boardScope, quality: this.qualityName });
+    // Evict the oldest beyond the limit.
+    while (this.realmCache.size > this.realmCacheLimit()) {
+      const [oldId, old] = this.realmCache.entries().next().value!;
+      this.realmCache.delete(oldId);
+      old.realm.dispose();
+      old.boardScope.dispose();
+    }
+  }
+
+  private clearRealmCache() {
+    for (const c of this.realmCache.values()) {
+      c.realm.dispose();
+      c.boardScope.dispose();
+    }
+    this.realmCache.clear();
+  }
+
   /**
    * Every point/spot light costs work on every lit pixel. Keep only the tier's budget (strongest first);
    * phones get two, which is where most of the per-pixel cost went.
@@ -443,7 +511,25 @@ export class ChessScene {
       if ((o as THREE.PointLight).isPointLight) lights.push(o as THREE.Light);
     });
     lights.sort((a, b) => b.intensity - a.intensity);
-    lights.slice(this.quality.maxPointLights).forEach(l => l.parent?.remove(l));
+    const keep = this.pointLightSlots();
+    lights.slice(keep).forEach(l => l.parent?.remove(l));
+    // Shaders are compiled for an exact light count. Pad every arena to the same count (unused lights
+    // stay dark) so switching arenas reuses the compiled shaders instead of recompiling all of them.
+    for (let i = Math.min(lights.length, keep); i < keep; i++) {
+      const pad = new THREE.PointLight(0x000000, 0, 1);
+      pad.name = 'light-slot';
+      group.add(pad);
+    }
+    const spots: THREE.SpotLight[] = [];
+    group.traverse(o => {
+      if ((o as THREE.SpotLight).isSpotLight) spots.push(o as THREE.SpotLight);
+    });
+    spots.slice(2).forEach(l => l.parent?.remove(l));
+    for (let i = spots.length; i < 2; i++) {
+      const pad = new THREE.SpotLight(0x000000, 0, 1);
+      pad.name = 'light-slot';
+      group.add(pad);
+    }
   }
 
   // ------------------------------------------------------------------ store reactions
@@ -1042,6 +1128,7 @@ export class ChessScene {
     this.post.dispose();
     this.envRT?.dispose();
     this.realm?.dispose();
+    this.clearRealmCache();
     this.boardScope?.dispose();
     this.pmrem?.dispose();
     soundEngine.stopAmbient();

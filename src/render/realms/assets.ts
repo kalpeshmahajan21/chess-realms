@@ -6,6 +6,26 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 /** Base URL for realm assets (served from /public/realms). */
 export const ASSET_ROOT = `${import.meta.env.BASE_URL}realms/`;
 
+/**
+ * Lite assets for phones/tablets and the Low tier: 512 px surface textures and lighting, 2K skies.
+ * On a phone screen they look the same and download about a third of the bytes, so arenas open faster.
+ * (The board's own scans, loaded with `image()`, keep full resolution: they are seen up close.)
+ */
+let liteAssets = false;
+export function setLiteAssets(on: boolean) {
+  liteAssets = on;
+}
+
+/** The file actually fetched for a realm asset path, honouring lite mode. */
+export function assetPath(path: string): string {
+  if (!liteAssets) return path;
+  return path
+    .replace(/_1k\.hdr$/, '_512.hdr')
+    .replace(/^(photo\/.+)_(4k|8k)\.jpg$/, '$1_2k.jpg')
+    .replace(/^space\/(milkyway|earth_day)_4k\.jpg$/, 'space/$1_2k.jpg')
+    .replace(/^(tex\/[^/]+\/)(diff|nor|rough)\.jpg$/, '$1$2_512.jpg');
+}
+
 const hdrLoader = new HDRLoader();
 const texLoader = new THREE.TextureLoader();
 const gltfLoader = new GLTFLoader();
@@ -26,7 +46,7 @@ export class AssetScope {
 
   /** Load an equirect HDR. `clamp` caps extreme highlights (e.g. street lamps) that would cause flares in reflections. */
   async hdr(path: string, clamp?: number): Promise<THREE.DataTexture> {
-    const tex = await hdrLoader.loadAsync(ASSET_ROOT + path);
+    const tex = await hdrLoader.loadAsync(ASSET_ROOT + assetPath(path));
     if (clamp) clampHdr(tex, clamp);
     tex.mapping = THREE.EquirectangularReflectionMapping;
     this.loaded++;
@@ -34,7 +54,7 @@ export class AssetScope {
   }
 
   async texture(path: string, opts: { srgb?: boolean; repeat?: [number, number]; anisotropy?: number } = {}): Promise<THREE.Texture> {
-    const tex = await texLoader.loadAsync(ASSET_ROOT + path);
+    const tex = await texLoader.loadAsync(ASSET_ROOT + assetPath(path));
     tex.colorSpace = opts.srgb === false ? THREE.NoColorSpace : THREE.SRGBColorSpace;
     tex.anisotropy = opts.anisotropy ?? 8;
     if (opts.repeat) {
