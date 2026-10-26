@@ -362,7 +362,7 @@ function ArenaPicker({ current, onDone }: { current: string; onDone: () => void 
       <button className="arena-row-arrow right" data-on={canRight} aria-label="More arenas" tabIndex={canRight ? 0 : -1} onClick={() => { tap(); page(1); }}>
         <ChevronRight size={22} strokeWidth={2.4} />
       </button>
-      <div ref={row} {...dragProps} className="arena-row flex gap-3 overflow-x-auto no-scrollbar snap-x snap-proximity px-4 sm:px-8 pb-1 pt-2" role="radiogroup" aria-label="Arena">
+      <div ref={row} {...dragProps} className="arena-row flex gap-3 overflow-x-auto no-scrollbar snap-x snap-proximity px-4 sm:px-8 scroll-px-4 sm:scroll-px-8 pb-1 pt-2" role="radiogroup" aria-label="Arena">
         {ARENA_THEMES.map((a, i) => {
           const on = a.id === current;
           return (
